@@ -7,15 +7,16 @@
  *
  */
 #pragma once
-#include <WiFiClientSecure.h>
+#include <Client.h>
 
 // Un-comment for extra functionality
 //#define EXTRA_FNS
 #define OPTIMIZE_SPEED
 
-class HTTPSRedirect : public WiFiClientSecure {
+class HTTPSRedirect {
   private:
-    const int _httpsPort;
+    Client* _Client;
+    int _httpsPort;
     bool _keepAlive;
     String _redirUrl;
     String _redirHost;
@@ -62,14 +63,15 @@ class HTTPSRedirect : public WiFiClientSecure {
 
   public:
 
-    HTTPSRedirect(void);
-    HTTPSRedirect(const int);
+    HTTPSRedirect(Client& Client);
     ~HTTPSRedirect();
 
-    bool GET(const String&, const char*);
-    bool GET(const String&, const char*, const bool&);
-    bool POST(const String&, const char*, const String&);
-    bool POST(const String&, const char*, const String&, const bool&);
+    bool connect(const String& host, int port);
+    void stop(void);
+    bool GET(const String&);
+    bool GET(const String&, const bool&);
+    bool POST(const String&, const String&);
+    bool POST(const String&, const String&, const bool&);
 
     int getStatusCode(void);
     String getReasonPhrase(void);

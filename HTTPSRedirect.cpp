@@ -9,12 +9,10 @@
 
 #include "HTTPSRedirect.h"
 #include "DebugMacros.h"
+#include <Arduino.h>
 
-HTTPSRedirect::HTTPSRedirect(void) : _httpsPort(443){
-  Init();
-}
-
-HTTPSRedirect::HTTPSRedirect(const int p) : _httpsPort(p){
+HTTPSRedirect::HTTPSRedirect(Client& Client) : 
+    _Client(& Client), _httpsPort(80) {
   Init();
 }
 
@@ -34,14 +32,14 @@ bool HTTPSRedirect::printRedir(void){
   unsigned int httpStatus;
   
   // Check if connection to host is alive
-  if (!connected()){
+  if (!_Client->connected()){
     Serial.println("Error! Not connected to host.");
     return false;
   }
 
   // Clear the input stream of any junk data before making the request
-  while(available())
-    read();
+  while(_Client->available())
+    _Client->read();
   
   // Create HTTP/1.1 compliant request string
   // HTTP/1.1 complaint request packet must exist
@@ -51,10 +49,10 @@ bool HTTPSRedirect::printRedir(void){
   // Make the actual HTTPS request using the method 
   // print() from the WifiClientSecure class
   // Make sure the input stream is cleared (as above) before making the call
-  print(_Request);
+  _Client->print(_Request);
 
   // Read HTTP Response Status lines
-  while (connected()) {
+  while (_Client->connected()) {
     
     httpStatus = getResponseStatus();
 
@@ -91,7 +89,7 @@ bool HTTPSRedirect::printRedir(void){
             _myResponse.redirected = true;
             
             // Make a new connection to the re-direction server
-            if (!connect(_redirHost.c_str(), _httpsPort)) {
+            if (!_Client->connect(_redirHost.c_str(), _httpsPort)) {
               Serial.println("Connection to re-directed URL failed!");
               return false;
             }
@@ -162,18 +160,18 @@ bool HTTPSRedirect::getLocationURL(void){
 
   // Keep reading from the input stream till we get to 
   // the location field in the header
-  flag = find("Location: ");
+  flag = _Client->find("Location: ");
 
   if (flag){
     // Skip URI protocol (http, https, etc. till '//')
     // This assumes that the location field will be containing
     // a URL of the form: http<s>://<hostname>/<url>
-    readStringUntil('/');
-    readStringUntil('/');
+    _Client->readStringUntil('/');
+    _Client->readStringUntil('/');
     // get hostname
-    _redirHost = readStringUntil('/');
+    _redirHost = _Client->readStringUntil('/');
     // get remaining url
-    _redirUrl = String('/') + readStringUntil('\n');
+    _redirUrl = String('/') + _Client->readStringUntil('\n');
   }
   else{
     DPRINT("No valid 'Location' field found in header!");
@@ -203,8 +201,8 @@ void HTTPSRedirect::fetchHeader(void){
   _hF.contentType = "";
   #endif
   
-  while (connected()) {
-    line = readStringUntil('\n');
+  while (_Client->connected()) {
+    line = _Client->readStringUntil('\n');
     
     DPRINTLN(line);
     
@@ -243,8 +241,8 @@ void HTTPSRedirect::fetchBodyUnChunked(unsigned len){
   String line;
   DPRINTLN("Body:");
 
-  while ((connected()) && (len > 0)) {
-    line = readStringUntil('\n');
+  while ((_Client->connected()) && (len > 0)) {
+    line = _Client->readStringUntil('\n');
     len -= line.length();
     // Content length will include all '\n' terminating characters
     // Decrement once more to account for the '\n' line ending character
@@ -265,8 +263,8 @@ void HTTPSRedirect::fetchBodyChunked(void){
   String line;
   int chunkSize;
 
-  while (connected()){
-    line = readStringUntil('\n');
+  while (_Client->connected()){
+    line = _Client->readStringUntil('\n');
 
     // Skip any empty lines
     if (line == "\r")
@@ -282,7 +280,7 @@ void HTTPSRedirect::fetchBodyChunked(void){
       break;
     
     while (chunkSize > 0){
-      line = readStringUntil('\n');
+      line = _Client->readStringUntil('\n');
       if (_printResponseBody)
         Serial.println(line);
 
@@ -316,7 +314,7 @@ unsigned int HTTPSRedirect::getResponseStatus(void){
 
   // Skip any empty lines
   do{
-    line = readStringUntil('\n');
+    line = _Client->readStringUntil('\n');
   }while(line.length() == 0);
   
   pos = line.indexOf("HTTP/1.1 ");
@@ -343,11 +341,20 @@ unsigned int HTTPSRedirect::getResponseStatus(void){
   return statusCode;
 }
 
-bool HTTPSRedirect::GET(const String& url, const char* host){
-  return GET(url, host, _printResponseBody);
+bool HTTPSRedirect::connect(const String& host, int port) {
+    _redirHost = host;
+    return _Client->connect(host.c_str(), port);
 }
 
-bool HTTPSRedirect::GET(const String& url, const char* host, const bool& disp){
+void HTTPSRedirect::stop(void) {
+    _Client->stop();
+}
+
+bool HTTPSRedirect::GET(const String& url){
+  return GET(url, _printResponseBody);
+}
+
+bool HTTPSRedirect::GET(const String& url, const bool& disp){
   bool retval;
   bool oldval;
 
@@ -358,13 +365,12 @@ bool HTTPSRedirect::GET(const String& url, const char* host, const bool& disp){
   // redirected Host and Url need to be initialized in case a 
   // reConnectFinalEndpoint() request is made after an initial request 
   // which did not have redirection
-  _redirHost = host;
   _redirUrl = url;
   
   InitResponse();
   
   // Create request packet
-  createGetRequest(url, host);
+  createGetRequest(url, _redirHost.c_str());
 
   // Calll request handler
   retval = printRedir();
@@ -373,11 +379,11 @@ bool HTTPSRedirect::GET(const String& url, const char* host, const bool& disp){
   return retval;
 }
 
-bool HTTPSRedirect::POST(const String& url, const char* host, const String& payload){
-  return POST(url, host, payload, _printResponseBody);
+bool HTTPSRedirect::POST(const String& url, const String& payload){
+  return POST(url, payload, _printResponseBody);
 }
 
-bool HTTPSRedirect::POST(const String& url, const char* host, const String& payload, const bool& disp){
+bool HTTPSRedirect::POST(const String& url, const String& payload, const bool& disp){
   bool retval;
   bool oldval;
 
@@ -388,13 +394,12 @@ bool HTTPSRedirect::POST(const String& url, const char* host, const String& payl
   // redirected Host and Url need to be initialized in case a 
   // reConnectFinalEndpoint() request is made after an initial request 
   // which did not have redirection
-  _redirHost = host;
   _redirUrl = url;
   
   InitResponse();
   
   // Create request packet
-  createPostRequest(url, host, payload);
+  createPostRequest(url, _redirHost.c_str(), payload);
 
   // Call request handler
   retval = printRedir();
@@ -438,8 +443,8 @@ void HTTPSRedirect::setContentTypeHeader(const char *type){
 #ifdef OPTIMIZE_SPEED
 bool HTTPSRedirect::reConnectFinalEndpoint(void){
   // disconnect if connection already exists
-  if (connected())
-    stop();
+  if (_Client->connected())
+    _Client->stop();
 
   DPRINT("_redirHost: ");
   DPRINTLN(_redirHost);
@@ -447,7 +452,7 @@ bool HTTPSRedirect::reConnectFinalEndpoint(void){
   DPRINTLN(_redirUrl);
 
   // Connect to stored final endpoint
-  if (!connect(_redirHost.c_str(), _httpsPort)) {
+  if (!_Client->connect(_redirHost.c_str(), _httpsPort)) {
     DPRINTLN("Connection to final URL failed!");
     return false;
   }
@@ -465,7 +470,7 @@ bool HTTPSRedirect::reConnectFinalEndpoint(void){
 void HTTPSRedirect::fetchBodyRaw(void){
   String line;
 
-  while (connected()){
+  while (_Client->connected()){
     line = readStringUntil('\n');
     if (_printResponseBody)
       Serial.println(line);
