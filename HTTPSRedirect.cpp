@@ -343,6 +343,7 @@ unsigned int HTTPSRedirect::getResponseStatus(void){
 
 bool HTTPSRedirect::connect(const String& host, int port) {
     _redirHost = host;
+    _httpsPort = port;
     return _Client->connect(host.c_str(), port);
 }
 
